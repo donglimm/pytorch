@@ -89,6 +89,57 @@ class TestScope(unittest.TestCase):
 
         self.assertEquals(scope.CurrentDeviceScope(), None)
 
+    def testTags(self):
+        self.assertEquals(scope.CurrentTags(), None)
+
+        tags1 = {"key1": "value1"}
+        tags2 = {"key2": "value2"}
+        tags3 = {"key3": "value3"}
+
+        tags_1_2 = tags1.copy()
+        tags_1_2.update(tags2)
+
+        tags_1_3 = tags1.copy()
+        tags_1_3.update(tags3)
+
+        tags_1_2_3 = tags_1_2.copy()
+        tags_1_2_3.update(tags3)
+
+        with scope.Tags(tags1):
+            self.assertEquals(scope.CurrentTags(), tags1)
+
+            with scope.Tags(tags2):
+                self.assertEquals(scope.CurrentTags(), tags_1_2)
+
+                with scope.Tags(tags3):
+                    self.assertEquals(scope.CurrentTags(), tags_1_2_3)
+
+            with scope.Tags(tags2):
+                self.assertEquals(scope.CurrentTags(), tags_1_2)
+
+            self.assertEquals(scope.CurrentTags(), tags1)
+
+            with scope.Tags(tags3):
+                self.assertEquals(scope.CurrentTags(), tags_1_3)
+
+            self.assertEquals(scope.CurrentTags(), tags1)
+        self.assertEquals(scope.CurrentTags(), None)
+
+    def testTagsConflict(self):
+        self.assertEquals(scope.CurrentTags(), None)
+
+        tags1 = {"key1": "value1"}
+        tags2 = {"key1": "value2"}
+        with scope.Tags(tags1):
+            self.assertEquals(scope.CurrentTags(), tags1)
+            try:
+                with scope.Tags(tags2):
+                    print("CurrentTags:".format(scope.CurrentTags()))
+            except ValueError as err:
+                    print("Tags conflict detected as expected: {}".format(err))
+            else:
+                assert False, "Expecting a Tags conflict failure"
+
     def testMultiThreaded(self):
         """
         Test that name/device scope are properly local to the thread
