@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-
+from src.parallelism import parallel_state as mpu
 import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -315,7 +315,8 @@ class PipelineScheduleSingle(_PipelineSchedule):
 
         # Split inputs into microbatches
         args_split, kwargs_split = self._split_inputs(args, kwargs)
-
+        # logging.info(f"DLDEBUG {args=}, {kwargs=}")
+        # logging.info(f"DLDEBUG {args_split=}, {kwargs_split=}")
         # Split target into microbatches
         if target is not None:
             targets_split = list(torch.tensor_split(target, self._n_microbatches))
@@ -619,12 +620,15 @@ class PipelineScheduleMulti(_PipelineSchedule):
 
         # Split inputs into microbatches
         args_split, kwargs_split = self._split_inputs(args, kwargs)
-
         # Split target into microbatches
         if target is not None:
             targets_split = list(torch.tensor_split(target, self._n_microbatches))
         else:
             targets_split = None
+
+        # TODO(dongli) need a better way to pass no tensor input
+        microbatch_attn_bias = self.microbatch_attn_bias
+        logging.info(f"DLDEBUG args_split: {args_split}, kwargs_split: {kwargs_split}, {microbatch_attn_bias=}, {targets_split=}")
 
         # Run microbatches
         self._step_microbatches(args_split, kwargs_split, targets_split, losses)
@@ -650,6 +654,9 @@ class PipelineScheduleMulti(_PipelineSchedule):
         not support models with skip connections.
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
+        for k, b in zip(kwarg_mbs, self.microbatch_attn_bias):
+            k['precomputed_attn_bias']= b
+        logging.info(f"DLDEBUG: {kwarg_mbs=}, {arg_mbs=}") 
 
         # Based on the plan in Step 1 created in __init__:
         # 2. Perform communication based on the pipeline_order
@@ -668,6 +675,8 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 if computation_type == _ComputationType.FORWARD:
                     # perform forward computation
                     stage = stage_index_to_stage[stage_index]
+                    #TODO(dongli) find a better way to expose stage_index to mpu and forward function.
+                    mpu.set_virtual_pipeline_model_parallel_rank(stage_index)
                     output = stage.forward_one_chunk(
                         mb_index, arg_mbs[mb_index], kwarg_mbs[mb_index]
                     )
@@ -676,7 +685,10 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 elif computation_type == _ComputationType.BACKWARD:
                     # perform backward computation
                     stage = stage_index_to_stage[stage_index]
+                    #TODO(dongli) find a better way to expose stage_index to mpu and backward function.
+                    mpu.set_virtual_pipeline_model_parallel_rank(stage_index)
                     loss = self._maybe_get_loss(stage, mb_index)
+                    logging.info(f"DLDEBUG _step_microbatches bwd {stage_index=}, {mb_index=}, {loss=}")
                     stage.backward_one_chunk(mb_index, loss=loss)
                     ops.extend(stage.get_bwd_send_ops(mb_index))
                 else:
@@ -840,6 +852,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
 
         for rank in range(self.pp_group_size):
             rank_ops = self._calculate_single_rank_operations(rank)
+            logging.info(f"DLDEBUG {rank=}, {rank_ops=}")
             self.pipeline_order[rank] = rank_ops
 
     def _calculate_single_rank_operations(self, rank) -> List[Optional[_Action]]:
@@ -861,7 +874,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
         total_ops = warmup_ops + fwd_bwd_ops + cooldown_ops
         # warmup_ops + fwd_bwd_ops * 2 + cooldown_ops == microbatch_ops * 2
 
-        logger.debug(
+        logger.info(
             "rank %s, warmup_ops %s, 1f1b %s, cooldown_ops %s total_ops %s",
             rank,
             warmup_ops,
@@ -875,6 +888,8 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             # Get the local index from 0 to n_local_stages-1
             local_index = (step // self.pp_group_size) % self.n_local_stages
             return (local_index * self.pp_group_size) + rank
+            #TODO(dongli) global stage index seems to be wrong. need to double check
+            # return local_index  + rank
 
         def backward_stage_index(step):
             local_index = (
