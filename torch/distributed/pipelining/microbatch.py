@@ -12,6 +12,8 @@ __all__ = [
     "TensorChunkSpec",
     "split_args_kwargs_into_chunks",
     "merge_chunks",
+    "_Replicate"
+    "_Shard"
 ]
 
 logger = logging.getLogger(__name__)
@@ -113,6 +115,9 @@ class TensorChunkSpec:
 class _Replicate:
     pass
 
+# Class used to specify shards of inputs
+class _Shard:
+    pass
 
 def _shard_dict_of_args(
     args_dict,
@@ -143,21 +148,31 @@ def _shard_dict_of_args(
     assert len(args_dict) == len(
         args_chunk_spec
     ), f"args_dict.keys() = {list(args_dict.keys())} args_chunk_spec.keys() = {list(args_chunk_spec.keys())}"
-
     for arg_key, arg in args_dict.items():
         flat, spec = tree_flatten(arg)
-        arg_specs.append(spec)
 
         chunk_spec = args_chunk_spec[arg_key]
         assert chunk_spec is not None  # Should have been set by caller
         chunk_spec_flat, _ = tree_flatten(chunk_spec)
-        if len(flat) != len(chunk_spec_flat):
+        logging.debug(
+                f"Argument value {arg_key=}, {arg=} {flat=}, {spec=}"
+                f"values as as chunk spec {chunk_spec=}, {chunk_spec_flat=}"
+            )
+        if chunk_spec_flat[0] is not _Shard and len(flat) != len(chunk_spec_flat):
             raise ValueError(
                 f"Argument value {arg} did not have the same number of "
                 f"values as as chunk spec {chunk_spec}"
             )
 
+        if chunk_spec_flat[0] is _Shard:
+            _, spec = tree_flatten(arg[0])
+
+        arg_specs.append(spec)
         sharded_arg_flat = []
+        if chunk_spec_flat[0] is _Shard:
+            sharded_arg_flat.append(flat)
+            args_sharded_replicated[arg_key] = sharded_arg_flat
+            continue
 
         for v, chunk_v in zip(flat, chunk_spec_flat):
             if chunk_v is _Replicate or not isinstance(v, torch.Tensor):
@@ -218,8 +233,6 @@ def _shard_dict_of_args(
                 raise TypeError(f"Unrecognized chunk spec: {chunk_v}")
 
         args_sharded_replicated[arg_key] = sharded_arg_flat
-
-    # chunks_flat : [num chunks, num args, num flat values]
     chunks_flat = []
     for chunk_idx in range(real_num_chunks):
         chunk_args = {}
@@ -229,13 +242,11 @@ def _shard_dict_of_args(
                 arg_single_chunk.append(v_flat[chunk_idx])
             chunk_args[key] = arg_single_chunk
         chunks_flat.append(chunk_args)
-
-    # args_split : [num chunks, num args]
     args_split = []
 
     for chunk in chunks_flat:
         per_chunk_args = {}
-        assert len(arg_specs) == len(chunk)
+        assert len(arg_specs) == len(chunk), f"len(arg_specs) != len(chunk), {chunk=} {arg_specs=}"
         for (key, arg), arg_spec in zip(chunk.items(), arg_specs):
             per_chunk_args[key] = tree_unflatten(arg, arg_spec)
         args_split.append(per_chunk_args)

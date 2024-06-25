@@ -102,7 +102,6 @@ class _PipelineSchedule(ABC):
         if not isinstance(stages, list):
             stages = [stages]
         contains_last_stage = any(stage.is_last for stage in stages)
-
         # Return losses if there is a container passed in
         if contains_last_stage and losses is not None:
             if len(self._internal_losses) != self._n_microbatches:
@@ -114,7 +113,6 @@ class _PipelineSchedule(ABC):
             losses.clear()
             # Copy internal losses to external container
             losses.extend(self._internal_losses)
-
         self._internal_losses.clear()
 
     @abstractmethod
@@ -315,8 +313,6 @@ class PipelineScheduleSingle(_PipelineSchedule):
 
         # Split inputs into microbatches
         args_split, kwargs_split = self._split_inputs(args, kwargs)
-        # logging.info(f"DLDEBUG {args=}, {kwargs=}")
-        # logging.info(f"DLDEBUG {args_split=}, {kwargs_split=}")
         # Split target into microbatches
         if target is not None:
             targets_split = list(torch.tensor_split(target, self._n_microbatches))
@@ -618,7 +614,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         for stage in self._stages:
             stage.clear_runtime_states()
 
-        # Split inputs into microbatches
+        # Split inputs into microbatches1
         args_split, kwargs_split = self._split_inputs(args, kwargs)
         # Split target into microbatches
         if target is not None:
@@ -626,9 +622,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         else:
             targets_split = None
 
-        # TODO(dongli) need a better way to pass no tensor input
-        microbatch_attn_bias = self.microbatch_attn_bias
-        logging.info(f"DLDEBUG args_split: {args_split}, kwargs_split: {kwargs_split}, {microbatch_attn_bias=}, {targets_split=}")
+        logging.debug(f"args_split: {args_split}, kwargs_split: {kwargs_split}, {targets_split=}")
 
         # Run microbatches
         self._step_microbatches(args_split, kwargs_split, targets_split, losses)
@@ -654,9 +648,6 @@ class PipelineScheduleMulti(_PipelineSchedule):
         not support models with skip connections.
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
-        for k, b in zip(kwarg_mbs, self.microbatch_attn_bias):
-            k['precomputed_attn_bias']= b
-        logging.info(f"DLDEBUG: {kwarg_mbs=}, {arg_mbs=}") 
 
         # Based on the plan in Step 1 created in __init__:
         # 2. Perform communication based on the pipeline_order
@@ -688,7 +679,6 @@ class PipelineScheduleMulti(_PipelineSchedule):
                     #TODO(dongli) find a better way to expose stage_index to mpu and backward function.
                     mpu.set_virtual_pipeline_model_parallel_rank(stage_index)
                     loss = self._maybe_get_loss(stage, mb_index)
-                    logging.info(f"DLDEBUG _step_microbatches bwd {stage_index=}, {mb_index=}, {loss=}")
                     stage.backward_one_chunk(mb_index, loss=loss)
                     ops.extend(stage.get_bwd_send_ops(mb_index))
                 else:
@@ -852,7 +842,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
 
         for rank in range(self.pp_group_size):
             rank_ops = self._calculate_single_rank_operations(rank)
-            logging.info(f"DLDEBUG {rank=}, {rank_ops=}")
+            logging.debug(f"{rank=}, {rank_ops=}")
             self.pipeline_order[rank] = rank_ops
 
     def _calculate_single_rank_operations(self, rank) -> List[Optional[_Action]]:

@@ -297,7 +297,7 @@ class _PipelineStageBase(ABC):
         # In case there is backward pass, set requires_grad for receive buffers
         # before first forward
         if self.has_backward and not self.set_requires_grad[fwd_chunk_id]:
-            logging.info(f"DLDEBUG: get_fwd_recv_ops {fwd_chunk_id=} {recv_infos=}")
+            logging.debug(f"get_fwd_recv_ops {fwd_chunk_id=} {recv_infos=}")
             for a in recv_infos:
                 if isinstance(a, _RecvInfo):
                     a.buffer.requires_grad_(True)
@@ -361,7 +361,7 @@ class _PipelineStageBase(ABC):
             # Can be None if an input has no grad
             # `grad_send_info` is a mirror of `args_recv_info`
             self.grad_send_info = self._create_grad_send_info(self.args_recv_info[0])
-        logging.info(f"DLDEBUG {self.log_prefix} {self.args_recv_info=}, {self.grad_send_info=}")
+        logging.debug(f"{self.log_prefix} {self.args_recv_info=}, {self.grad_send_info=}")
         ops: List[dist.P2POp] = []
         # TODO(dongli): temp fix, 
         self.grads_input_filtered = [grad for grad in self.grads_input if grad is not None]
@@ -509,26 +509,17 @@ class _PipelineStageBase(ABC):
 
         if self.is_first:
             # First stage doesn't need to receive anything
-            #TODO(dongli): find a better way to change kwargs arg name based on whether it is the 1st stage
-            # pipeline_parallel_input_tensor = kwargs.get("pipeline_parallel_input_tensor", None)
-            # kwargs["pipeline_parallel_input_tensor"] = None
-            # kwargs["tokens"] = pipeline_parallel_input_tensor
-            # logging.info(f"DLDEBUG tokens input update {self.stage_index=}")
-
             composite_args = args
             composite_kwargs = kwargs or {}
-            # Note: is_first_microbatch is by default None/False
-            composite_kwargs["is_first_microbatch"]=True
         else:
             # Receive activations for this chunk
             # Activations only come in args form
-            tokens = kwargs.get("tokens", None)
+            # tokens = kwargs.get("tokens", None)
             input_tensor = self._retrieve_recv_activations(fwd_chunk_id)
             composite_args=args
             composite_kwargs = kwargs or {}
-            composite_kwargs["tokens"]=tokens
+            # composite_kwargs["tokens"]=tokens
             composite_kwargs["pipeline_parallel_input_tensor"]=input_tensor[0]
-            composite_kwargs["is_first_microbatch"]=False
 
         self._validate_fwd_input(args, kwargs)
 
@@ -609,7 +600,7 @@ class _PipelineStageBase(ABC):
             }
 
         self.grads_input = self.backward_maybe_with_nosync(bwd_kwargs)
-        logging.info(f"DLDEBUG {self.log_prefix} {self.stage_index=}, {self.is_first=}, {self.is_last=}, {bwd_chunk_id=} {stage_output=} {input_values=} {loss=}, {bwd_kwargs=}, {self.grads_input=}")
+        logging.debug(f"{self.log_prefix} {self.stage_index=}, {self.is_first=}, {self.is_last=}, {bwd_chunk_id=} {stage_output=} {input_values=} {loss=}, {bwd_kwargs=}, {self.grads_input=}")
         logger.debug(f"{self.log_prefix} Backwarded chunk {bwd_chunk_id}")  # noqa: G004
 
     def _validate_fwd_input(self, args, kwargs):
@@ -1165,8 +1156,8 @@ class PipelineStage(_PipelineStageBase):
         self.prev_stage = stage_global_rank((self.group_rank - 1) % self.group_size)
         self.next_stage = stage_global_rank((self.group_rank + 1) % self.group_size)
 
-        logger.info(
-            f"DLDEBUG finished pipeline stage init, {self.stage_index=}, {self.is_first=}, "  # noqa: G004
+        logger.debug(
+            f"finished pipeline stage init, {self.stage_index=}, {self.is_first=}, "  # noqa: G004
             f"{self.is_last=}, {self.num_stages=}, "
             f"inputs: {[inp.shape for inp in self.inputs]}, "
             f"output: {[output.shape for output in self.outputs]}"
