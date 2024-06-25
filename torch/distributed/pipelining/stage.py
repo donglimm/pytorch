@@ -361,9 +361,8 @@ class _PipelineStageBase(ABC):
             # Can be None if an input has no grad
             # `grad_send_info` is a mirror of `args_recv_info`
             self.grad_send_info = self._create_grad_send_info(self.args_recv_info[0])
-        logging.debug(f"{self.log_prefix} {self.args_recv_info=}, {self.grad_send_info=}")
+        logging.debug(f"{self.log_prefix} {self.args_recv_info=}, {self.grad_send_info=}, {self.grads_input=}")
         ops: List[dist.P2POp] = []
-        # TODO(dongli): temp fix, 
         self.grads_input_filtered = [grad for grad in self.grads_input if grad is not None]
         for grad, grad_recv_stage in zip(self.grads_input_filtered, self.grad_send_info):
             if isinstance(grad, torch.Tensor) and grad_recv_stage is not None:
@@ -531,8 +530,8 @@ class _PipelineStageBase(ABC):
             output = self.forward_maybe_with_nosync(*composite_args, **composite_kwargs)
 
         except Exception as e:
-            logger.info(f"DLDEBUG {e=}")
-            exc_msg = f""" DLDEBUG
+            logger.info(f"{e=}")
+            exc_msg = f"""
             {self.log_prefix} failed to run forward:
             args: {map_debug_info(composite_args)}
             kwargs: {map_debug_info(composite_kwargs)}

@@ -13,7 +13,7 @@ __all__ = [
     "split_args_kwargs_into_chunks",
     "merge_chunks",
     "_Replicate"
-    "_Shard"
+    "_PerMicroBatchList"
 ]
 
 logger = logging.getLogger(__name__)
@@ -111,12 +111,12 @@ class TensorChunkSpec:
         return kwargs_chunk_spec
 
 
-# Class used to specify replication of inputs
+# Class used to specify shards of inputs
 class _Replicate:
     pass
 
-# Class used to specify shards of inputs
-class _Shard:
+# Class used to specify inputs as a list of per-micro-batch input
+class _PerMicroBatchList:
     pass
 
 def _shard_dict_of_args(
@@ -158,18 +158,18 @@ def _shard_dict_of_args(
                 f"Argument value {arg_key=}, {arg=} {flat=}, {spec=}"
                 f"values as as chunk spec {chunk_spec=}, {chunk_spec_flat=}"
             )
-        if chunk_spec_flat[0] is not _Shard and len(flat) != len(chunk_spec_flat):
+        if chunk_spec_flat[0] is not _PerMicroBatchList and len(flat) != len(chunk_spec_flat):
             raise ValueError(
                 f"Argument value {arg} did not have the same number of "
                 f"values as as chunk spec {chunk_spec}"
             )
 
-        if chunk_spec_flat[0] is _Shard:
+        if chunk_spec_flat[0] is _PerMicroBatchList:
             _, spec = tree_flatten(arg[0])
 
         arg_specs.append(spec)
         sharded_arg_flat = []
-        if chunk_spec_flat[0] is _Shard:
+        if chunk_spec_flat[0] is _PerMicroBatchList:
             sharded_arg_flat.append(flat)
             args_sharded_replicated[arg_key] = sharded_arg_flat
             continue
