@@ -514,13 +514,16 @@ class _PipelineStageBase(ABC):
         else:
             # Receive activations for this chunk
             # Activations only come in args form
-            # tokens = kwargs.get("tokens", None)
-            input_tensor = self._retrieve_recv_activations(fwd_chunk_id)
             composite_args=args
             composite_kwargs = kwargs or {}
-            # composite_kwargs["tokens"]=tokens
-            composite_kwargs["pipeline_parallel_input_tensor"]=input_tensor[0]
-
+            input_tensors = self._retrieve_recv_activations(fwd_chunk_id)
+            for i, input_tensor in enumerate(input_tensors):
+                kwargs_key = self.input_args_idx_to_kwargs_key.get(str(i), None)
+                if kwargs_key is not None:
+                    composite_kwargs[kwargs_key]=input_tensor
+                else:
+                    composite_args.append(input_tensor)
+            logging.debug(f"{args=}, {kwargs=}, {self.input_args_idx_to_kwargs_key=}, {composite_args=}, {composite_kwargs=}")
         self._validate_fwd_input(args, kwargs)
 
         # Compute forward
@@ -1110,6 +1113,7 @@ class PipelineStage(_PipelineStageBase):
         num_stages (int): The total number of stages.
         device (torch.device): The device where this stage is located.
         input_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The input arguments for the submodule.
+        input_args_idx_to_kwargs_key: In case, the stage needs to the input args to kwargs with map: input_args_idex to key_of_kwargs,  
         output_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The output arguments for the submodule.
         group (dist.ProcessGroup, optional): The process group for distributed training. If None, default group.
     """
@@ -1121,6 +1125,7 @@ class PipelineStage(_PipelineStageBase):
         num_stages: int,
         device: torch.device,
         input_args: Union[torch.Tensor, Tuple[torch.Tensor, ...]],
+        input_args_idx_to_kwargs_key: Optional[dict[str, str]] = None,
         output_args: Optional[Union[torch.Tensor, Tuple[torch.Tensor, ...]]] = None,
         group: Optional[dist.ProcessGroup] = None,
     ):
@@ -1131,6 +1136,7 @@ class PipelineStage(_PipelineStageBase):
         self.outputs: List[torch.Tensor] = []
 
         self.inputs = _create_empty_tensors(input_args, device)
+        self.input_args_idx_to_kwargs_key = input_args_idx_to_kwargs_key or {}
 
         if output_args is None:
             logger.info("output_args not provided, performing forward using input_args")
