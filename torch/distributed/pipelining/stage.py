@@ -55,7 +55,7 @@ class _RecvInfo:
         self.buffer = buffer
 
     def __repr__(self):
-        return f"_RecvInfo(input={self.input_name}, source={self.source}, shape={self.buffer.size()}, {self.buffer.dtype=}, {self.buffer.device=}, {self.buffer.requires_grad=})"
+        return f"_RecvInfo(input={self.input_name}, source={self.source}, shape={self.buffer.size()})"
 
 
 # An input can be either a received activation or a model input
@@ -297,7 +297,6 @@ class _PipelineStageBase(ABC):
         # In case there is backward pass, set requires_grad for receive buffers
         # before first forward
         if self.has_backward and not self.set_requires_grad[fwd_chunk_id]:
-            logging.debug(f"get_fwd_recv_ops {fwd_chunk_id=} {recv_infos=}")
             for a in recv_infos:
                 if isinstance(a, _RecvInfo):
                     a.buffer.requires_grad_(True)
@@ -361,12 +360,11 @@ class _PipelineStageBase(ABC):
             # Can be None if an input has no grad
             # `grad_send_info` is a mirror of `args_recv_info`
             self.grad_send_info = self._create_grad_send_info(self.args_recv_info[0])
-        logging.debug(f"{self.log_prefix} {self.args_recv_info=}, {self.grad_send_info=}, {self.grads_input=}")
         ops: List[dist.P2POp] = []
         self.grads_input_filtered = [grad for grad in self.grads_input if grad is not None]
         for grad, grad_recv_stage in zip(self.grads_input_filtered, self.grad_send_info):
             if isinstance(grad, torch.Tensor) and grad_recv_stage is not None:
-                logger.info(
+                logger.debug(
                     f"{self.log_prefix} "  # noqa: G004
                     f"Sending gradient to Stage {grad_recv_stage}: {grad.size()}"
                 )
@@ -530,7 +528,6 @@ class _PipelineStageBase(ABC):
             output = self.forward_maybe_with_nosync(*composite_args, **composite_kwargs)
 
         except Exception as e:
-            logger.info(f"{e=}")
             exc_msg = f"""
             {self.log_prefix} failed to run forward:
             args: {map_debug_info(composite_args)}
@@ -602,7 +599,6 @@ class _PipelineStageBase(ABC):
             }
 
         self.grads_input = self.backward_maybe_with_nosync(bwd_kwargs)
-        logging.debug(f"{self.log_prefix} {self.stage_index=}, {self.is_first=}, {self.is_last=}, {bwd_chunk_id=} {stage_output=} {input_values=} {loss=}, {bwd_kwargs=}, {self.grads_input=}")
         logger.debug(f"{self.log_prefix} Backwarded chunk {bwd_chunk_id}")  # noqa: G004
 
     def _validate_fwd_input(self, args, kwargs):
@@ -1112,7 +1108,7 @@ class PipelineStage(_PipelineStageBase):
         num_stages (int): The total number of stages.
         device (torch.device): The device where this stage is located.
         input_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The input arguments for the submodule.
-        input_args_idx_to_kwargs_key: In case, the stage needs to the input args to kwargs with map: input_args_idex to key_of_kwargs,  
+        input_args_idx_to_kwargs_key (dict[str, str]]): maps input args to kwargs by using the map between input_args_idx to key_of_kwargs.
         output_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The output arguments for the submodule.
         group (dist.ProcessGroup, optional): The process group for distributed training. If None, default group.
     """

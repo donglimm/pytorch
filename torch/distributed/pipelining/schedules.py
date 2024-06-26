@@ -614,15 +614,14 @@ class PipelineScheduleMulti(_PipelineSchedule):
         for stage in self._stages:
             stage.clear_runtime_states()
 
-        # Split inputs into microbatches1
+        # Split inputs into microbatches
         args_split, kwargs_split = self._split_inputs(args, kwargs)
+
         # Split target into microbatches
         if target is not None:
             targets_split = list(torch.tensor_split(target, self._n_microbatches))
         else:
             targets_split = None
-
-        logging.debug(f"args_split: {args_split}, kwargs_split: {kwargs_split}, {targets_split=}")
 
         # Run microbatches
         self._step_microbatches(args_split, kwargs_split, targets_split, losses)
@@ -842,7 +841,6 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
 
         for rank in range(self.pp_group_size):
             rank_ops = self._calculate_single_rank_operations(rank)
-            logging.debug(f"{rank=}, {rank_ops=}")
             self.pipeline_order[rank] = rank_ops
 
     def _calculate_single_rank_operations(self, rank) -> List[Optional[_Action]]:
@@ -864,7 +862,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
         total_ops = warmup_ops + fwd_bwd_ops + cooldown_ops
         # warmup_ops + fwd_bwd_ops * 2 + cooldown_ops == microbatch_ops * 2
 
-        logger.info(
+        logger.debug(
             "rank %s, warmup_ops %s, 1f1b %s, cooldown_ops %s total_ops %s",
             rank,
             warmup_ops,
@@ -878,8 +876,6 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             # Get the local index from 0 to n_local_stages-1
             local_index = (step // self.pp_group_size) % self.n_local_stages
             return (local_index * self.pp_group_size) + rank
-            #TODO(dongli) global stage index seems to be wrong. need to double check
-            # return local_index  + rank
 
         def backward_stage_index(step):
             local_index = (

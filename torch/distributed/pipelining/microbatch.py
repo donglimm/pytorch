@@ -111,7 +111,7 @@ class TensorChunkSpec:
         return kwargs_chunk_spec
 
 
-# Class used to specify shards of inputs
+# Class used to specify replication of inputs
 class _Replicate:
     pass
 
@@ -154,10 +154,7 @@ def _shard_dict_of_args(
         chunk_spec = args_chunk_spec[arg_key]
         assert chunk_spec is not None  # Should have been set by caller
         chunk_spec_flat, _ = tree_flatten(chunk_spec)
-        logging.debug(
-                f"Argument value {arg_key=}, {arg=} {flat=}, {spec=}"
-                f"values as as chunk spec {chunk_spec=}, {chunk_spec_flat=}"
-            )
+
         if chunk_spec_flat[0] is not _PerMicroBatchList and len(flat) != len(chunk_spec_flat):
             raise ValueError(
                 f"Argument value {arg} did not have the same number of "
