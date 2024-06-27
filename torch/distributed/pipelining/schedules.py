@@ -30,13 +30,18 @@ logger = logging.getLogger(__name__)
 class _ComputationType(Enum):
     FORWARD = 1
     BACKWARD = 2
+    SHARD = 3
+    UNSHARD = 4
 
     def __str__(self):
         if self == _ComputationType.FORWARD:
             return "F"
-        else:
+        elif self == _ComputationType.BACKWARD:
             return "B"
-
+        elif self == _ComputationType.SHARD:
+            return "S"
+        elif self == _ComputationType.UNSHARD:
+            return "U"
 
 class _Action(NamedTuple):
     computation_type: _ComputationType
@@ -562,6 +567,8 @@ class PipelineScheduleMulti(_PipelineSchedule):
         args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+        shard_func = None,
+        unshard_func = None,
     ):
         if len(stages) <= 1:
             raise ValueError(
@@ -597,6 +604,17 @@ class PipelineScheduleMulti(_PipelineSchedule):
             stage._prepare_forward_infra(n_microbatches)
             if self._has_backward:
                 stage._prepare_backward_infra(n_microbatches)
+
+        self._shard_func = shard_func
+        self._unshard_func = unshard_func
+
+    def get_custom_func(self, computation_type):
+        if computation_type == _ComputationType.SHARD:
+            return self._shard_func
+        elif computation_type == _ComputationType.UNShARD:
+            return self._unshard_func
+        else:
+            raise ValueError(f"Unknown computation type {computation_type}")
 
     def step(self, *args, target=None, losses: Optional[List] = None, **kwargs):
         """
@@ -680,6 +698,12 @@ class PipelineScheduleMulti(_PipelineSchedule):
                     loss = self._maybe_get_loss(stage, mb_index)
                     stage.backward_one_chunk(mb_index, loss=loss)
                     ops.extend(stage.get_bwd_send_ops(mb_index))
+                elif computation_type == _ComputationType.SHARD:
+                    stage = stage_index_to_stage[stage_index]
+                    stage.reshard()
+                elif computation_type == _ComputationType.UNSHARD:
+                    stage = stage_index_to_stage[stage_index]
+                    stage.unshard()
                 else:
                     raise ValueError(f"Unknown computation type {computation_type}")
 
@@ -842,6 +866,13 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
         for rank in range(self.pp_group_size):
             rank_ops = self._calculate_single_rank_operations(rank)
             self.pipeline_order[rank] = rank_ops
+
+    def insert_custom_call(self, rank, time_stamp, stage_index, custom_call_type):
+        """
+        allows users to mannually insert custom call into the schedule
+        """
+        new_action = _Action(custom_call_type, stage_index=stage_index, microbatch_index=0)
+        self.pipeline_order.insert(time_stamp, new_action)
 
     def _calculate_single_rank_operations(self, rank) -> List[Optional[_Action]]:
         def get_rank_warmup_ops(rank):

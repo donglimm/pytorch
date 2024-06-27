@@ -17,7 +17,7 @@ from torch.nn.parallel import DistributedDataParallel
 from ._backward import stage_backward
 from ._debug import map_debug_info
 from ._utils import flatten_args, PipeInfo, validate_tensors_metadata
-
+from src.parallelism.data_parallel.fsdpv2 import FSDPModule, fully_shard
 
 __all__ = [
     "PipelineStage",
@@ -454,6 +454,22 @@ class _PipelineStageBase(ABC):
         else:
             out_val = self.submod(*args, **kwargs)
         return out_val
+
+    def reshard(self) -> None:
+        if isinstance(self.submod, fsdpmodule):
+            for module in self.submod.modules():
+                if isinstance(module, FSDPModule):
+                    module.reshard()
+        else:
+            raise notimplementederror
+
+    def unshard(self, async_op: bool = False) -> Optional["UnshardHandle"]:
+        if isinstance(self.submod, fsdpmodule):
+            for module in self.submod.modules():
+                if isinstance(module, FSDPModule):
+                    module.unshard(async_op=True)
+        else:
+            raise notimplementederror
 
     def backward_maybe_with_nosync(self, bwd_kwargs: Dict):
         """
